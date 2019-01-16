@@ -18,9 +18,9 @@ class Experiment:
 
     def subset(self, attribute_filter=None, base_filter=None):
 
-        if base_filter:
+        if base_filter is not None:
             self.mask = self.vs().base_search(base_filter)
-        elif attribute_filter:
+        if attribute_filter is not None:
             self.mask = self.mask & \
                 self.vs().attribute_search(attribute_filter)
 
@@ -29,12 +29,7 @@ class Experiment:
 
     def concurrent_counts(self, duration=15):
         # Weekly
-        dailym = 24*60
-        i = np.arange(7*24*60/duration)
-        d = np.repeat(np.arange(1, 8), 24*60/duration)
-        t = [str(timedelta(minutes=int(m % dailym))) for m in i*duration]
-        cc = pd.DataFrame({'i': i, 'd': d,  't': t, 'count': 0})
-        return(cc)
+        pass
 
 
 class OPShift:
@@ -125,13 +120,17 @@ class DataTable:
 
     def datetime(self, flt):
         seconds = (flt - 25569) * 86400.0
+        return(self._round_time(datetime.utcfromtimestamp(seconds), 60))
 
-        return(datetime.utcfromtimestamp(seconds))
+    @staticmethod
+    def _round_time(dt, round_to=60):
+        seconds = (dt.replace(tzinfo=None) - dt.min).seconds
+        rounding = (seconds+round_to/2) // round_to * round_to
+        return(dt + timedelta(0, rounding-seconds, -dt.microsecond))
 
     def time(self, flt):
         seconds = timedelta(seconds=int(flt))
         d = datetime(1, 1, 1) + seconds
-
         return(d.days-1, d.hours, d.minutes, d.seconds)
 
 
@@ -229,26 +228,24 @@ class VehicleShiftTable(DataTable):
     def base_search(self, base):
         return((self.df['Base_Code'] == base).values)
 
-    def shift_matrix(self, duration, target_week):
+    def shift_matrix(self, duration, target_week, subset=None):
 
-        # dailym = 24*60
-        # dailyi = dailym/duration
-        # max = 7*24*60/duration
-        # i = np.arange(max)
-        # d = np.repeat(np.arange(1, 8), dailyi)
-        # t = [str(timedelta(minutes=int(m % dailym))) for m in i*duration]
-        #
-        # mat = np.zeros((self.df.shape[0], max))
-        # ts = pd.DataFrame({'i': i, 'd': d,  't': t})
-        #
-        cols = ['Start_DateTime', 'Shift_Duration', 'Repeat_Until_Date',
-                'Repeat_Cycle', 'Repeat_Pattern']
+        df = self.df
+        if subset is not None:
+            df = self.df.iloc[subset]
 
         target_dt = datetime.strptime('2017-11-04T00:00:00',
                                       "%Y-%m-%dT%H:%M:%S")
         target_end_dt = target_dt + timedelta(days=7)
-        duration_str = str(duration) + 'm'
-        for index, row in self.df[cols].iterrows():
+        duration_str = str(duration) + 'min'
+        shiftmat = pd.DataFrame(index=pd.date_range(target_dt, target_end_dt,
+                                                    freq=duration_str),
+                                columns=df['Shift_Id'])
+        shiftmat = shiftmat.fillna(0)
+
+        cols = ['Shift_Id', 'Start_DateTime', 'Shift_Duration',
+                'Repeat_Until_Date', 'Repeat_Cycle', 'Repeat_Pattern']
+        for index, row in df[cols].iterrows():
 
             first_dt = self.datetime(row['Start_DateTime'])
             last_dt = self.datetime(row['Repeat_Until_Date'])
@@ -260,7 +257,32 @@ class VehicleShiftTable(DataTable):
             dt_range = pd.date_range(first_dt, target_dt, freq=f)
 
             start_dt = dt_range[-1]
+            cycle_days = [int(d) for d in row['Repeat_Pattern'].split(',')]
             # Go through cycles overlapping range
-            while(start_dt < target_dt+)
-            end_dt = start_dt + timedelta(days=row['Shift_Duration'])
-            pd.date_range(start_dt, end_dt, freq=duration_str)
+            while(start_dt < target_end_dt):
+                # Iterate through days in cycle
+                for d in cycle_days:
+                    day_dt = start_dt + timedelta(days=d)
+                    end_dt = day_dt + timedelta(days=row['Shift_Duration'])
+
+                    if day_dt < target_end_dt and end_dt >= target_dt:
+                        # Build shift range
+
+                        if day_dt < target_dt:
+                            day_dt = target_dt
+                        if end_dt > target_end_dt:
+                            end_dt = target_end_dt
+
+                        # print(day_dt)
+                        # print(end_dt)
+                        shift_range = pd.date_range(day_dt, end_dt,
+                                                    freq=duration_str)
+                        shift_range = shift_range[0:-1]  # Drop last value
+                        shift_range = shift_range.floor(freq=duration_str)
+                        sid = row['Shift_Id']
+                        shiftmat.loc[shift_range, [sid]] = 1
+
+                # Next cycle
+                start_dt = start_dt + timedelta(days=row['Repeat_Cycle'])
+
+        return(shiftmat)
