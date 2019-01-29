@@ -22,14 +22,24 @@ class Experiment:
             self.mask = self.vs().base_search(base_filter)
         if attribute_filter is not None:
             self.mask = self.mask & \
-                self.vs().attribute_search(attribute_filter)
+                self.vs().attribute_search(attribute_filter, or_op=False)
 
     def vs(self):
         return(self.opshifts.vs)
 
-    def concurrent_counts(self, duration=15):
+    def shift_matrix(self, duration, target_week):
         # Weekly
-        pass
+        sm = self.vs().shift_matrix(duration, target_week, subset=self.mask)
+
+        # Change column names
+        sids = sm.columns.values
+        names = self.vs().df.loc[
+            self.vs().df['Shift_Id'].isin(sids)
+            ]['Vehicle_Name'].tolist()
+
+        sm.columns = names
+
+        return(sm)
 
 
 class OPShift:
@@ -200,8 +210,6 @@ class VehicleShiftTable(DataTable):
         ]
         super(VehicleShiftTable, self).__init__(csvfile, cols)
 
-        #self.df.set_index("Shift_Id")
-
         # Make lookup for attributes
         d = defaultdict(list)
         for i, a in self.df["Vehicle_Attributes"].iteritems():
@@ -216,12 +224,15 @@ class VehicleShiftTable(DataTable):
         a = s[1:-1].split(',')
         return(a)
 
-    def attribute_search(self, attr_list):
+    def attribute_search(self, attr_list, or_op=True):
         rows = set()
         for a in attr_list:
             if a in self.attribute_lookup:
                 s = self.attribute_lookup[a]
-                rows = rows | s
+                if or_op or len(rows) == 0:
+                    rows = rows | s
+                else:
+                    rows = rows & s
 
         return(self.df['Shift_Id'].isin(rows).values)
 
@@ -234,12 +245,13 @@ class VehicleShiftTable(DataTable):
         if subset is not None:
             df = self.df.iloc[subset]
 
-        target_dt = datetime.strptime('2017-11-04T00:00:00',
+        target_dt = datetime.strptime(target_week,
                                       "%Y-%m-%dT%H:%M:%S")
         target_end_dt = target_dt + timedelta(days=7)
         duration_str = str(duration) + 'min'
-        shiftmat = pd.DataFrame(index=pd.date_range(target_dt, target_end_dt,
-                                                    freq=duration_str),
+        periods = pd.date_range(target_dt, target_end_dt, freq=duration_str)
+        periods = periods[0:-1]
+        shiftmat = pd.DataFrame(index=periods,
                                 columns=df['Shift_Id'])
         shiftmat = shiftmat.fillna(0)
 
