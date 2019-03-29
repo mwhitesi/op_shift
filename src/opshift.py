@@ -27,6 +27,82 @@ class Experiment:
     def vs(self):
         return(self.opshifts.vs)
 
+    def delete():
+        pass
+
+    def insert():
+        # Need naming scheme + shift id
+        # Need Mobilisation Delay
+        # Need Event modifiers
+        # Need base
+        pass
+
+    def base_planner():
+        pass
+
+    def to_opshift(self, f, duration, target_week):
+
+        # Step 1: convert binary matrix to OP shift format
+        sm = pd.read_csv(f, encoding='utf-8', index_col=0)
+        sm = sm.iloc[:, 0:-1]
+        ncol = sm.shape[1]
+
+        if ncol != 24*7*60/duration:
+            raise Exception(
+                'Incorrect shift matrix dimesions for duration {}'.format(
+                    duration
+                ))
+
+        target_dt = datetime.strptime(target_week,
+                                      "%Y-%m-%dT%H:%M:%S")
+        target_end_dt = target_dt + timedelta(days=7)
+        duration_str = str(duration) + 'min'
+        dts = pd.date_range(
+            target_dt, target_end_dt, freq=duration_str)[0:-1]
+
+        times = np.array([dt.time() for dt in dts])
+        days = np.array([dt.weekday() for dt in dts])
+        startday = target_dt.weekday()
+
+
+        for i, row in sm.iterrows():
+
+            # Find status change positions
+            idx = np.where(np.roll(row, 1) != row)[0]
+
+            ln = len(idx)
+
+            if ln == 0:
+                starts = np.array([0])
+                ends = np.array([ncol])
+            else:
+                if row[idx[0]] != 1:
+                    # start on a 'on' block
+                    idx = np.roll(idx, -1)
+
+                starts = idx[np.arange(0, ln, 2)]
+                ends = idx[np.arange(1, ln, 2)]
+
+            lens = ends - starts
+            lens[lens < 0] = lens[lens < 0] + ncol
+
+            if not np.all(lens == lens[0]):
+                raise Exception(
+                    "Variable shift block lengths: {}\nShift:\n{}\n".format(
+                        ends - starts, row))
+
+
+
+
+            # Only consider 2 simple repeat patterns 1 day or 7 day
+            if len(starts) == 7 or len(starts) == 1:
+                # 1 Day repeat pattern
+                pass
+
+
+
+
+
     def shift_matrix(self, duration, target_week):
         # Weekly
         sm = self.vs().shift_matrix(duration, target_week, subset=self.mask)
@@ -113,7 +189,7 @@ class OPShift:
 
             self.md = MobilisationDelaysTable(md_output)
             self.vs = VehicleShiftTable(vs_output)
-            self.e = DataTable(e_output)
+            self.e = ShiftEventTable(e_output)
 
 
 class DataTable:
@@ -298,3 +374,40 @@ class VehicleShiftTable(DataTable):
                 start_dt = start_dt + timedelta(days=row['Repeat_Cycle'])
 
         return(shiftmat)
+
+
+class ShiftEventTable(DataTable):
+
+    se_lib = {
+        'METRO_30': [
+            {
+                'Event_Type': 1,
+                'Offset': 0.020833333333,
+                'Offset_From': 0,
+                'Parameters-->':
+                    '<RspPermitted NonePermitted="0"><Filter><CallPriority><FilteredValueSet><Value>P1</Value><Value>P2</Value></FilteredValueSet></CallPriority></Filter></RspPermitted>',
+                '': 0
+            },
+            {
+                'Event_Type': 1,
+                'Offset': 0.000694444444,
+                'Offset_From': 0,
+                'Parameters-->':
+                    '<RspPermitted NonePermitted="1"/>',
+                '': 0
+            }]
+    }
+
+    def __init__(self, csvfile):
+
+        cols = [
+            "Shift_Id",
+            "Event_Type",
+            "Offset",
+            "Offset_From",
+            "Parameters-->",
+            ""
+        ]
+        super(ShiftEventTable, self).__init__(csvfile, cols)
+
+        #print(self.df.loc[1])
