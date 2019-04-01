@@ -6,7 +6,7 @@ import re
 from io import StringIO
 from csv import writer
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 class Experiment:
@@ -26,9 +26,6 @@ class Experiment:
 
     def vs(self):
         return(self.opshifts.vs)
-
-    def delete():
-        pass
 
     def insert():
         # Need naming scheme + shift id
@@ -60,12 +57,15 @@ class Experiment:
         dts = pd.date_range(
             target_dt, target_end_dt, freq=duration_str)[0:-1]
 
-        times = np.array([dt.time() for dt in dts])
-        days = np.array([dt.weekday() for dt in dts])
-        startday = target_dt.weekday()
-
+        daynight_shifts = 0
+        starts_totals = ends_totals = np.zeros(sm.shape[1])
 
         for i, row in sm.iterrows():
+
+            # Special shifts that need to be treated separately
+            if np.all(row == 1):
+                daynight_shifts += 1
+                continue
 
             # Find status change positions
             idx = np.where(np.roll(row, 1) != row)[0]
@@ -73,8 +73,7 @@ class Experiment:
             ln = len(idx)
 
             if ln == 0:
-                starts = np.array([0])
-                ends = np.array([ncol])
+                raise Exception("0% or 100% shift not permitted")
             else:
                 if row[idx[0]] != 1:
                     # start on a 'on' block
@@ -90,16 +89,66 @@ class Experiment:
                 raise Exception(
                     "Variable shift block lengths: {}\nShift:\n{}\n".format(
                         ends - starts, row))
+            if not len(starts) <= 7:
+                raise Exception(
+                    "Can't have multiple shifts per day.\n" +
+                    "Shift starts found: {}".format(
+                        starts))
 
-
-
+            # Convert to minutes
+            thislen = self._opshift_len(lens[0] * duration)
+            thisstart = dts[starts[0]]
 
             # Only consider 2 simple repeat patterns 1 day or 7 day
-            if len(starts) == 7 or len(starts) == 1:
-                # 1 Day repeat pattern
-                pass
+            if len(starts) == 7:
+                # 7 starts in a week can be treated as 1 Day repeat pattern
+                thisrc = '1'
+                thisrp = '0'
+
+            else:
+                # Weekly Repeat
+                thisrc = '7'
+                # Time deltas from start
+                tds = [dts[s] - thisstart for s in starts]
+
+                if(np.any(np.array([td.seconds for td in tds]) != 0)):
+                    raise Exception('A shift must have the same start time ' +
+                                    'every day')
+
+                thisrp = ','.join([str(td.days) for td in tds])
+
+            shift = {
+                'start': self._opshift_datetime(thisstart),
+                'duration': thislen,
+                'cycle': thisrc,
+                'pattern': thisrp
+            }
+
+            # Record start/stops
+            starts_totals[starts] += 1
+            ends_totals[ends] += 1
+
+        self.assign_dn_starts(starts_totals, daynight_shifts)
 
 
+    def _opshift_datetime(self, dt):
+        deltasecs = (dt - datetime(1899, 12, 30))
+        deltadays = deltasecs.total_seconds() / float(86400)
+        return(self._round(deltadays))
+
+    def _opshift_len(self, l):
+        fl = float(l) / (24*60)
+        return(self._round(fl))
+
+    def _round(self, fl, n=12):
+        return('{0:.{p}f}'.format(fl, p=n))
+
+
+    def assign_dn_starts(self, st, dn_count):
+        # Use periods with low start/stop counts to do shift
+        # change on continuous shifts
+
+        
 
 
 
