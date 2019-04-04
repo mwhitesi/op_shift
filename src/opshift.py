@@ -144,11 +144,14 @@ class Experiment:
         return('{0:.{p}f}'.format(fl, p=n))
 
 
-    def assign_dn_starts(self, st, dn_count):
+    def assign_dn_starts(self, shift_change_counts, new_shifts, duration,
+                         first, last):
         # Use periods with low start/stop counts to do shift
         # change on continuous shifts
 
-        
+        # These shifts are configured to be 12 hrs long
+
+        paired_counts = [seq(first, last, by)]
 
 
 
