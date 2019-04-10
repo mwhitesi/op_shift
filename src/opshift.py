@@ -60,6 +60,8 @@ class Experiment:
         daynight_shifts = 0
         starts_totals = ends_totals = np.zeros(sm.shape[1])
 
+        shifts = []
+
         for i, row in sm.iterrows():
 
             # Special shifts that need to be treated separately
@@ -96,7 +98,7 @@ class Experiment:
                         starts))
 
             # Convert to minutes
-            thislen = self._opshift_len(lens[0] * duration)
+            thislen = lens[0] * duration
             thisstart = dts[starts[0]]
 
             # Only consider 2 simple repeat patterns 1 day or 7 day
@@ -117,18 +119,22 @@ class Experiment:
 
                 thisrp = ','.join([str(td.days) for td in tds])
 
-            shift = {
-                'start': self._opshift_datetime(thisstart),
-                'duration': thislen,
-                'cycle': thisrc,
-                'pattern': thisrp
-            }
+            sh = self._shift_hash(thisstart, thislen, thisrc, thisrp)
+            shifts.append(sh)
 
             # Record start/stops
             starts_totals[starts] += 1
             ends_totals[ends] += 1
 
-        self.assign_dn_starts(starts_totals, daynight_shifts)
+        print(starts_totals)
+
+        if daynight_shifts > 0:
+            #self.assign_dn_starts(starts_totals, daynight_shifts, duration, 20, 80)
+            shifts.extend(self.assign_dn_starts(starts_totals, 20, duration, 20, 80, dts))
+
+        # Assign bases
+
+
 
 
     def _opshift_datetime(self, dt):
@@ -143,16 +149,61 @@ class Experiment:
     def _round(self, fl, n=12):
         return('{0:.{p}f}'.format(fl, p=n))
 
+    def _shift_hash(self, s, l, c, p):
+        shift = {
+            'start': self._opshift_datetime(s),
+            'duration': self._opshift_len(l),
+            'cycle': c,
+            'pattern': p
+        }
+
+        return(shift)
 
     def assign_dn_starts(self, shift_change_counts, new_shifts, duration,
-                         first, last):
-        # Use periods with low start/stop counts to do shift
-        # change on continuous shifts
+                         first, last, dts):
+        # Use periods with low start/stop counts to do shift change
+        # for continuous shifts
 
         # These shifts are configured to be 12 hrs long
+        # Start and stop need to occur between first and last
+        hr12 = 12*60/duration
 
-        paired_counts = [seq(first, last, by)]
+        # First day
+        start_window = np.arange(first, last-hr12+1).astype(int)
+        end_window = (start_window + hr12).astype(int)
 
+        paired_counts = np.zeros(len(start_window))
+
+        # Totals thru week
+        for d in range(8):
+            paired_counts = paired_counts + \
+                shift_change_counts[start_window*d] + \
+                shift_change_counts[end_window*d]
+
+        remaining = new_shifts
+        starts = []
+        print(remaining)
+        while remaining > 0:
+            # Find the best position to assign shifts
+            p = np.argmin(paired_counts)
+            start = first+p
+
+            day = self._shift_hash(dts[start], 12*60, '1', '0')
+            i = int(start+hr12)
+            night = self._shift_hash(dts[i], 12*60, '1', '0')
+
+            starts.extend([day, night])
+
+            paired_counts[p] = paired_counts[p] + 1
+            remaining = remaining - 1
+
+        return(starts)
+
+
+    def assign_bases(self, shifts, n):
+        # Greedy algorithm to assign a shift one of a number of start/stop
+        # bases
+        pass
 
 
     def shift_matrix(self, duration, target_week):
