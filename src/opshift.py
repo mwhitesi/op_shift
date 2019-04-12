@@ -1,4 +1,6 @@
 
+import functools
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import re
@@ -15,6 +17,11 @@ class Experiment:
     def __init__(self, file_path):
         self.opshifts = OPShift(file_path)
         self.mask = np.array([True] * self.vs().df.shape[0])
+        self.vehicle_ids = self.vs().shift_id_list()
+
+
+
+
 
     def subset(self, attribute_filter=None, base_filter=None):
 
@@ -27,14 +34,19 @@ class Experiment:
     def vs(self):
         return(self.opshifts.vs)
 
-    def insert():
+    def delete(self, current_subset=None, id_list=None):
+
+        if current_subset:
+            # 
+
+
+
+
+    def insert(self):
         # Need naming scheme + shift id
         # Need Mobilisation Delay
         # Need Event modifiers
         # Need base
-        pass
-
-    def base_planner():
         pass
 
     def to_opshift(self, f, duration, target_week):
@@ -104,12 +116,13 @@ class Experiment:
             # Only consider 2 simple repeat patterns 1 day or 7 day
             if len(starts) == 7:
                 # 7 starts in a week can be treated as 1 Day repeat pattern
-                thisrc = '1'
-                thisrp = '0'
+                thisrc = 1
+                thisrp = [0]
+                stype = '7d'
 
             else:
                 # Weekly Repeat
-                thisrc = '7'
+                thisrc = 7
                 # Time deltas from start
                 tds = [dts[s] - thisstart for s in starts]
 
@@ -117,22 +130,22 @@ class Experiment:
                     raise Exception('A shift must have the same start time ' +
                                     'every day')
 
-                thisrp = ','.join([str(td.days) for td in tds])
+                thisrp = [td.days for td in tds]
+                stype = str(len(tds))+'d'
 
-            sh = self._shift_hash(thisstart, thislen, thisrc, thisrp)
+            sh = self._shift_hash(thisstart, thislen, thisrc, thisrp, stype)
             shifts.append(sh)
 
             # Record start/stops
             starts_totals[starts] += 1
             ends_totals[ends] += 1
 
-        print(starts_totals)
-
         if daynight_shifts > 0:
             #self.assign_dn_starts(starts_totals, daynight_shifts, duration, 20, 80)
             shifts.extend(self.assign_dn_starts(starts_totals, 20, duration, 20, 80, dts))
 
         # Assign bases
+        self.assign_bases(shifts, 3, 1)
 
 
 
@@ -149,12 +162,25 @@ class Experiment:
     def _round(self, fl, n=12):
         return('{0:.{p}f}'.format(fl, p=n))
 
-    def _shift_hash(self, s, l, c, p):
+    def _shift_hash(self, s, l, c, p, t):
+        wd = s.weekday()
+        mins = s.hour * 60 + s.minute
+
+        if c == 1:
+            key = np.repeat(mins, 7)
+        else:
+            key = np.zeros(7)
+            for td in p:
+                d = (wd + td) % 7
+                key[d] = mins
+
         shift = {
             'start': self._opshift_datetime(s),
             'duration': self._opshift_len(l),
-            'cycle': c,
-            'pattern': p
+            'cycle': str(c),
+            'pattern': ','.join([str(i) for i in p]),
+            'key': key,
+            'type': t
         }
 
         return(shift)
@@ -182,15 +208,14 @@ class Experiment:
 
         remaining = new_shifts
         starts = []
-        print(remaining)
         while remaining > 0:
             # Find the best position to assign shifts
             p = np.argmin(paired_counts)
             start = first+p
 
-            day = self._shift_hash(dts[start], 12*60, '1', '0')
+            day = self._shift_hash(dts[start], 12*60, 1, [0], '7d24')
             i = int(start+hr12)
-            night = self._shift_hash(dts[i], 12*60, '1', '0')
+            night = self._shift_hash(dts[i], 12*60, 1, [0], '7d24')
 
             starts.extend([day, night])
 
@@ -200,10 +225,74 @@ class Experiment:
         return(starts)
 
 
-    def assign_bases(self, shifts, n):
-        # Greedy algorithm to assign a shift one of a number of start/stop
+    def assign_bases(self, shifts, n, do_plot):
+        # Greedy algorithm to assign a shift to one of a number of start/stop
         # bases
-        pass
+
+        def custom_sort(a_hash, b_hash):
+            a = a_hash['key']
+            b = b_hash['key']
+            i = np.nonzero(a)[0][0]
+            j = np.nonzero(b)[0][0]
+
+            if i == j:
+                if a[i] < b[j]:
+                    return -1
+                if a[i] > b[j]:
+                    return 1
+                else:
+                    return 0
+            else:
+                if i < j:
+                    return -1
+                if i > j:
+                    return 1
+                else:
+                    return 0
+
+        # Split into types
+        shiftsets = defaultdict(list)
+        for x in shifts:
+            shiftsets[x['type']].append(x)
+
+        # Sort sets
+        for t, l in shiftsets.items():
+            shiftsets[t] = sorted(l, key=functools.cmp_to_key(custom_sort))
+
+        # Assign each set 1 by 1
+        base_record = defaultdict(list)
+        current_base = 0
+        for t, l in shiftsets.items():
+            for s in l:
+
+                s['base'] = current_base
+                base_record[current_base].append(s['key'])
+                current_base = (current_base + 1) % n
+
+        if do_plot:
+            self.plot_base_record(base_record)
+
+
+    def plot_base_record(self, br):
+
+        def flatten(wk):
+            vals = []
+            for d, mins in enumerate(wk):
+                if mins != 0:
+                    vals.append(d*24*60+mins)
+            return vals
+
+        for b, vlist in br.items():
+            vals = [y for v in vlist for y in flatten(v)]
+            br[b] = vals
+
+        bins = np.arange(0,7*24*60,step=60)
+        plt.hist(br.values(), bins, label=br.keys())
+        plt.legend(loc='upper right')
+        plt.show()
+
+
+
 
 
     def shift_matrix(self, duration, target_week):
@@ -403,6 +492,9 @@ class VehicleShiftTable(DataTable):
         a = s[1:-1].split(',')
         return(a)
 
+    def shift_id_list(self):
+        return(self.df['Shift_Id'])
+
     def attribute_search(self, attr_list, or_op=True):
         rows = set()
         for a in attr_list:
@@ -481,7 +573,7 @@ class VehicleShiftTable(DataTable):
 
 class ShiftEventTable(DataTable):
 
-    se_lib = {
+    lib = {
         'METRO_30': [
             {
                 'Event_Type': 1,
