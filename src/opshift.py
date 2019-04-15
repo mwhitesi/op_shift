@@ -6,9 +6,10 @@ import pandas as pd
 import re
 
 from io import StringIO
-from csv import writer
+from csv import writer, QUOTE_NONE
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 
 class Experiment:
@@ -18,10 +19,6 @@ class Experiment:
         self.opshifts = OPShift(file_path)
         self.mask = np.array([True] * self.vs().df.shape[0])
         self.vehicle_ids = self.vs().shift_id_list()
-
-
-
-
 
     def subset(self, attribute_filter=None, base_filter=None):
 
@@ -37,7 +34,19 @@ class Experiment:
     def delete(self, current_subset=None, id_list=None):
 
         if current_subset:
-            # 
+            delete_list = self.vehicle_ids[self.mask]
+        elif id_list and len(id_list) > 0:
+            delete_list = id_list
+        else:
+            raise Exception('Invalid parameter')
+
+        # Send delete list to shift instance
+        self.opshifts.delete(delete_list)
+
+
+    def write(self, f):
+        self.opshifts.write(f)
+
 
 
 
@@ -144,20 +153,16 @@ class Experiment:
             #self.assign_dn_starts(starts_totals, daynight_shifts, duration, 20, 80)
             shifts.extend(self.assign_dn_starts(starts_totals, 20, duration, 20, 80, dts))
 
-        # Assign bases
-        self.assign_bases(shifts, 3, 1)
-
-
-
+        return(shifts)
 
     def _opshift_datetime(self, dt):
         deltasecs = (dt - datetime(1899, 12, 30))
-        deltadays = deltasecs.total_seconds() / float(86400)
-        return(self._round(deltadays))
+        deltadays = Decimal(deltasecs.total_seconds()) / Decimal(86400)
+        return(deltadays)
 
     def _opshift_len(self, l):
-        fl = float(l) / (24*60)
-        return(self._round(fl))
+        dl = Decimal(int(l)) / Decimal(24*60)
+        return(dl)
 
     def _round(self, fl, n=12):
         return('{0:.{p}f}'.format(fl, p=n))
@@ -208,6 +213,7 @@ class Experiment:
 
         remaining = new_shifts
         starts = []
+
         while remaining > 0:
             # Find the best position to assign shifts
             p = np.argmin(paired_counts)
@@ -216,6 +222,7 @@ class Experiment:
             day = self._shift_hash(dts[start], 12*60, 1, [0], '7d24')
             i = int(start+hr12)
             night = self._shift_hash(dts[i], 12*60, 1, [0], '7d24')
+            day['unit_id']
 
             starts.extend([day, night])
 
@@ -224,8 +231,7 @@ class Experiment:
 
         return(starts)
 
-
-    def assign_bases(self, shifts, n, do_plot):
+    def assign_bases(self, shifts, base_names, do_plot):
         # Greedy algorithm to assign a shift to one of a number of start/stop
         # bases
 
@@ -255,6 +261,8 @@ class Experiment:
         for x in shifts:
             shiftsets[x['type']].append(x)
 
+        n = len(base_names)
+
         # Sort sets
         for t, l in shiftsets.items():
             shiftsets[t] = sorted(l, key=functools.cmp_to_key(custom_sort))
@@ -265,13 +273,12 @@ class Experiment:
         for t, l in shiftsets.items():
             for s in l:
 
-                s['base'] = current_base
+                s['base'] = base_names[current_base]
                 base_record[current_base].append(s['key'])
                 current_base = (current_base + 1) % n
 
         if do_plot:
             self.plot_base_record(base_record)
-
 
     def plot_base_record(self, br):
 
@@ -291,8 +298,22 @@ class Experiment:
         plt.legend(loc='upper right')
         plt.show()
 
+    def assign_unit_names(self, shifts, prefix, level, ids, types=None):
 
 
+        for i, s in enumerate(shifts):
+            if not types:
+                hr = DataTable.datetime(s['start']).hour
+                if hr >= 0 and hr <= 12:
+                    t = '1'
+                else:
+                    t = '2'
+            else:
+                t = types[i]
+
+            s['unit'] = '{}-{}{}{}'.format(prefix, t, level, ids[i])
+
+            print(s['unit'])
 
 
     def shift_matrix(self, duration, target_week):
@@ -383,22 +404,55 @@ class OPShift:
             self.vs = VehicleShiftTable(vs_output)
             self.e = ShiftEventTable(e_output)
 
+    def delete(self, id_list):
+        self.vs.delete(id_list)
+        self.e.delete(id_list)
+
+    def write(self, f):
+        with open(f, 'w', newline='') as csvfile:
+            csvfile.write('VEHICLE TASKS FILE\tV2.06\tUTF-8\r\n')
+            csvfile.write('\r\n')
+            csvfile.write('\r\n')
+            self.md.write(csvfile)
+            csvfile.write('\r\n')
+            csvfile.write('\r\n')
+            self.vs.write(csvfile)
+            csvfile.write('\r\n')
+            csvfile.write('\r\n')
+            self.e.write(csvfile)
+            csvfile.write('\r\n')
+            csvfile.write('\r\n')
+
 
 class DataTable:
 
     df = None
 
-    def __init__(self, csvfile, cols=None):
-        if cols:
+    def __init__(self, csvfile, cols=None, decimal_format_cols=None):
+        if cols and decimal_format_cols:
+            conv = {}
+            for c in decimal_format_cols:
+                conv[c] = self.decimal_from_value
             self.df = pd.read_csv(csvfile, encoding='utf-8', names=cols,
-                                  index_col=False)
+                                  index_col=False,
+                                  converters=conv
+                                  )
+        elif cols:
+            self.df = pd.read_csv(csvfile, encoding='utf-8', names=cols,
+                                  index_col=False,
+                                  )
         else:
             self.df = pd.read_csv(csvfile, encoding='utf-8', header=None,
                                   index_col=False)
 
-    def datetime(self, flt):
-        seconds = (flt - 25569) * 86400.0
-        return(self._round_time(datetime.utcfromtimestamp(seconds), 60))
+    @staticmethod
+    def datetime(flt):
+        seconds = Decimal(flt - 25569) * Decimal(86400)
+        return(DataTable._round_time(datetime.utcfromtimestamp(seconds), 60))
+
+    @staticmethod
+    def decimal_from_value(value):
+        return Decimal(value)
 
     @staticmethod
     def _round_time(dt, round_to=60):
@@ -411,25 +465,53 @@ class DataTable:
         d = datetime(1, 1, 1) + seconds
         return(d.days-1, d.hours, d.minutes, d.seconds)
 
+    def write(self, fh):
+
+        csvwriter = writer(fh,
+                           delimiter='\t',
+                           quoting=QUOTE_NONE,
+                           lineterminator='\r\n',
+                           quotechar='')
+        csvwriter.writerows(self.header)
+
+        df = self.df.copy()
+
+        # Convert Decimal object to strings to control formatting
+        for c in df.columns:
+            if isinstance(df[c].iloc[1], Decimal):
+                df[c] = df[c].apply(lambda x: '{0:.12f}'.format(x))
+
+        df.to_csv(fh,
+            sep='\t',
+            na_rep='',
+            header=False,
+            index=False,
+            quoting=QUOTE_NONE,
+            quotechar='',
+            line_terminator='\r\n',
+            float_format='%.12f'
+        )
+
 
 class MobilisationDelaysTable(DataTable):
 
-    header = ("[Mobilisation Delays]\n"
-              "# Profile Name  Call Class Attributes	Distribution Type"
-              "	Offset	Parameter 1	Parameter 2	Lower Bound	Upper Bound\n"
-              "# --------------------  --------------------	"
-              "--------------------	--------------------	"
-              "--------------------	--------------------	"
-              "--------------------	--------------------\n")
+    header = (["[Mobilisation Delays]"],
+              ("# Profile Name", "Call Class Attributes", "Distribution Type",
+               "Offset", "Parameter 1", "Parameter 2", "Lower Bound", "Upper Bound"),
+              ("# --------------------", "--------------------",
+               "--------------------", "--------------------",
+               "--------------------", "--------------------",
+               "--------------------", "--------------------"))
 
     profile_names = dict()
 
     def __init__(self, csvfile):
-
         cols = ["Profile_Name", "Call_Class_Attributes",
                 "Distribution_Type", "Offset", "Parameter_1",
                 "Parameter_2", "Lower_Bound", "Upper_Bound"]
-        super(MobilisationDelaysTable, self).__init__(csvfile, cols)
+        deci_cols = ["Offset", "Parameter_1",
+                     "Parameter_2", "Lower_Bound", "Upper_Bound"]
+        super(MobilisationDelaysTable, self).__init__(csvfile, cols, deci_cols)
 
         self.profile_names = {name: 1 for name in
                               self.df.Profile_Name.unique()}
@@ -437,22 +519,22 @@ class MobilisationDelaysTable(DataTable):
 
 class VehicleShiftTable(DataTable):
 
-    header = ("[Vehicle Shifts]\n",
-              "# Shift Id	Vehicle Name	Base Code	Start Date/Time	"
-              "Shift Duration	Repeat Until Date	Handover Delay	"
-              "Repeat Cycle	Repeat Pattern	Vehicle Attributes	"
-              "Mobilisation Delay	Dispatch Priority	Dispatch Region	"
-              "Associate Vehicle	Allow Deployment	"
-              "Response Restrictions	Notes Date	Notes\n"
-              "# --------------------	--------------------	"
-              "--------------------	--------------------	"
-              "--------------------	--------------------	"
-              "--------------------	--------------------	"
-              "--------------------	--------------------	"
-              "--------------------	--------------------	"
-              "--------------------	--------------------	"
-              "--------------------	--------------------	"
-              "--------------------	--------------------\n")
+    header = (["[Vehicle Shifts]"],
+              ("# Shift Id", "Vehicle Name", "Base Code", "Start Date/Time",
+               "Shift Duration", "Repeat Until Date", "Handover Delay",
+               "Repeat Cycle", "Repeat Pattern", "Vehicle Attributes",
+               "Mobilisation Delay", "Dispatch Priority", "Dispatch Region",
+               "Associate Vehicle", "Allow Deployment",
+               "Response Restrictions", "Notes Date", "Notes"),
+              ("# --------------------", "--------------------",
+                "--------------------", "--------------------",
+                "--------------------", "--------------------",
+                "--------------------", "--------------------",
+                "--------------------", "--------------------",
+                "--------------------", "--------------------",
+                "--------------------", "--------------------",
+                "--------------------", "--------------------",
+                "--------------------", "--------------------"))
 
     def __init__(self, csvfile):
 
@@ -476,7 +558,14 @@ class VehicleShiftTable(DataTable):
             "Notes_Date",
             "Notes"
         ]
-        super(VehicleShiftTable, self).__init__(csvfile, cols)
+        deci_cols = [
+            "Start_DateTime",
+            "Shift_Duration",
+            "Repeat_Until_Date",
+            "Handover_Delay",
+            "Notes_Date"
+        ]
+        super(VehicleShiftTable, self).__init__(csvfile, cols, deci_cols)
 
         # Make lookup for attributes
         d = defaultdict(list)
@@ -570,6 +659,71 @@ class VehicleShiftTable(DataTable):
 
         return(shiftmat)
 
+    def delete(self, id_list):
+        self.df = self.df[~self.df['Shift_Id'].isin(id_list)]
+
+    def insert(self, shift_list):
+
+        cols = [
+            "Shift_Id",
+            "Vehicle_Name",
+            "Base_Code",
+            "Start_DateTime",
+            "Shift_Duration",
+            "Repeat_Until_Date",
+            "Handover_Delay",
+            "Repeat_Cycle",
+            "Repeat_Pattern",
+            "Vehicle_Attributes",
+            "Mobilization_Delay",
+            "Dispatch_Priority",
+            "Dispatch_Region",
+            "Associate_Vehicle",
+            "Allow_Deployment",
+            "Response_Restrictions",
+            "Notes_Date",
+            "Notes"
+        ]
+
+        shift = {
+            'start': self._opshift_datetime(s),
+            'duration': self._opshift_len(l),
+            'cycle': str(c),
+            'pattern': ','.join([str(i) for i in p]),
+            'key': key,
+            'type': t
+        }
+
+    def _insert_shift(self, sft):
+
+        # Required
+        new_shift = {
+            "Shift_Id": sft['id'],
+            "Vehicle_Name": sft['unit'],
+            "Base_Code": sft['base'],
+            "Start_DateTime": sft['start'],
+            "Shift_Duration": sft['duration'],
+            "Repeat_Cycle": sft['cycle'],
+            "Repeat_Pattern": sft['pattern'],
+            "Vehicle_Attributes": sft['attr'],
+            "Mobilization_Delay": sft['delay']
+        }
+
+        # Optional with defaults
+        new_shift["Handover_Delay"] = sft['handover'] if sft['handover'] else Decimal(0)
+        new_shift["Dispatch_Priority"] = sft['priority'] if sft['priority'] else int(1)
+        new_shift["Dispatch_Region"] = sft['region'] if sft['region'] else None
+        new_shift["Associate_Vehicle"] = sft['vehicle'] if sft['vehicle'] else int(-1)
+        new_shift["Allow_Deployment"] = sft['deploy'] if sft['deploy'] else int(1)
+        new_shift["Response_Restrictions"] = sft['restrict'] if sft['restrict'] else '<RspPermitted NonePermitted="0"/>'
+        new_shift["Notes_Date"] = sft['note_date'] if sft['note_date'] else Decimal(0)
+        new_shift["Notes"] = sft['note_date'] if sft['note_date'] else None
+        new_shift["Repeat_Until_Date"] = sft['until'] if sft['until'] else Decimal(47484.000000000000)
+
+        self.append(new_shift, ignore_index=True)
+
+
+
 
 class ShiftEventTable(DataTable):
 
@@ -593,6 +747,11 @@ class ShiftEventTable(DataTable):
             }]
     }
 
+    header = (["[Events]"],
+              ("# Shift Id", "Event Type", "Offset", "Offset From Start", "Parameters-->"),
+              ("# --------------------", "--------------------", "--------------------",
+               "--------------------", "--------------------", "--------------------"))
+
     def __init__(self, csvfile):
 
         cols = [
@@ -603,6 +762,12 @@ class ShiftEventTable(DataTable):
             "Parameters-->",
             ""
         ]
+        deci_cols = [
+            "Offset"
+        ]
         super(ShiftEventTable, self).__init__(csvfile, cols)
 
         #print(self.df.loc[1])
+
+    def delete(self, id_list):
+        self.df = self.df[~self.df['Shift_Id'].isin(id_list)]
