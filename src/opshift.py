@@ -17,8 +17,8 @@ class Experiment:
 
     def __init__(self, file_path):
         self.opshifts = OPShift(file_path)
-        self.mask = np.array([True] * self.vs().df.shape[0])
         self.vehicle_ids = self.vs().shift_id_list()
+        self._reset_mask()
 
     def subset(self, attribute_filter=None, base_filter=None):
 
@@ -30,6 +30,9 @@ class Experiment:
 
     def vs(self):
         return(self.opshifts.vs)
+
+    def _reset_mask(self):
+        self.mask = np.array([True] * self.vs().df.shape[0])
 
     def delete(self, current_subset=None, id_list=None):
 
@@ -43,20 +46,28 @@ class Experiment:
         # Send delete list to shift instance
         self.opshifts.delete(delete_list)
 
+        self._reset_mask()
+
 
     def write(self, f):
         self.opshifts.write(f)
 
+    def insert(self, shift_list):
+        # Identify available ids
+        n2 = len(shift_list)
+        i = np.max(self.vs().df['Shift_Id'])
+        curr = np.arange(0, i)
+        avail = curr[~np.isin(curr, self.vs().df['Shift_Id'])]
 
+        missing = n2 - len(avail)
+        ids = np.concatenate(avail, np.arange(i+1, i+missing+1)) if avail else np.arange(i+1, i+missing+1)
 
+        for i, s in enumerate(shift_list):
+            s['id'] = ids[i]
 
+        self.opshift.insert(shift_list)
 
-    def insert(self):
-        # Need naming scheme + shift id
-        # Need Mobilisation Delay
-        # Need Event modifiers
-        # Need base
-        pass
+        self._reset_mask()
 
     def to_opshift(self, f, duration, target_week):
 
@@ -222,7 +233,6 @@ class Experiment:
             day = self._shift_hash(dts[start], 12*60, 1, [0], '7d24')
             i = int(start+hr12)
             night = self._shift_hash(dts[i], 12*60, 1, [0], '7d24')
-            day['unit_id']
 
             starts.extend([day, night])
 
@@ -299,8 +309,6 @@ class Experiment:
         plt.show()
 
     def assign_unit_names(self, shifts, prefix, level, ids, types=None):
-
-
         for i, s in enumerate(shifts):
             if not types:
                 hr = DataTable.datetime(s['start']).hour
@@ -313,8 +321,37 @@ class Experiment:
 
             s['unit'] = '{}-{}{}{}'.format(prefix, t, level, ids[i])
 
-            print(s['unit'])
+    def assign_unit_names(self, shifts, prefix, level, ids, types=None):
+        for i, s in enumerate(shifts):
+            if not types:
+                hr = DataTable.datetime(s['start']).hour
+                if hr >= 0 and hr <= 12:
+                    t = '1'
+                else:
+                    t = '2'
+            else:
+                t = types[i]
 
+            s['unit'] = '{}-{}{}{}'.format(prefix, t, level, ids[i])
+
+    def assign_attr(self, shifts, attr):
+        if not isinstance(attr, list):
+            raise Exception('Invalid attr parameter')
+
+        for s in shifts:
+            s['attr'] = attr
+
+    def assign_delay(self, shifts, dname):
+        if not self.opshifts.md.defined(dname):
+            raise Exception('Unknown Mobilisation Delay parameter')
+        for s in shifts:
+            s['delay'] = dname
+
+    def assign_events(self, shifts, ename):
+        if not self.opshifts.e.defined(ename):
+            raise Exception('Unknown Event Type parameter')
+        for s in shifts:
+            s['event'] = ename
 
     def shift_matrix(self, duration, target_week):
         # Weekly
@@ -408,6 +445,9 @@ class OPShift:
         self.vs.delete(id_list)
         self.e.delete(id_list)
 
+    def insert(self, shift_list):
+        pass
+
     def write(self, f):
         with open(f, 'w', newline='') as csvfile:
             csvfile.write('VEHICLE TASKS FILE\tV2.06\tUTF-8\r\n')
@@ -466,7 +506,6 @@ class DataTable:
         return(d.days-1, d.hours, d.minutes, d.seconds)
 
     def write(self, fh):
-
         csvwriter = writer(fh,
                            delimiter='\t',
                            quoting=QUOTE_NONE,
@@ -516,6 +555,10 @@ class MobilisationDelaysTable(DataTable):
         self.profile_names = {name: 1 for name in
                               self.df.Profile_Name.unique()}
 
+    def defined(self, profile):
+        r = True if profile in self.profile_names else False
+
+        return(r)
 
 class VehicleShiftTable(DataTable):
 
@@ -569,10 +612,12 @@ class VehicleShiftTable(DataTable):
 
         # Make lookup for attributes
         d = defaultdict(list)
-        for i, a in self.df["Vehicle_Attributes"].iteritems():
+        for i, r in self.df[["Vehicle_Attributes", "Shift_Id"]].iterrows():
+            a = r["Vehicle_Attributes"]
+            s = r["Shift_Id"]
             alist = VehicleShiftTable._attr_parser(a)
             for a2 in alist:
-                d[a2].append(i)
+                d[a2].append(s)
 
         self.attribute_lookup = {k: set(l) for k, l in d.items()}
 
@@ -660,39 +705,20 @@ class VehicleShiftTable(DataTable):
         return(shiftmat)
 
     def delete(self, id_list):
+        # Remove from attribute_lookup
+        for id in id_list:
+            r = self.df[self.df['Shift_Id'] == id]
+            a = r["Vehicle_Attributes"]
+            alist = VehicleShiftTable._attr_parser(a)
+            for a2 in alist:
+                d[a2].remove(id)
+
         self.df = self.df[~self.df['Shift_Id'].isin(id_list)]
 
+
     def insert(self, shift_list):
-
-        cols = [
-            "Shift_Id",
-            "Vehicle_Name",
-            "Base_Code",
-            "Start_DateTime",
-            "Shift_Duration",
-            "Repeat_Until_Date",
-            "Handover_Delay",
-            "Repeat_Cycle",
-            "Repeat_Pattern",
-            "Vehicle_Attributes",
-            "Mobilization_Delay",
-            "Dispatch_Priority",
-            "Dispatch_Region",
-            "Associate_Vehicle",
-            "Allow_Deployment",
-            "Response_Restrictions",
-            "Notes_Date",
-            "Notes"
-        ]
-
-        shift = {
-            'start': self._opshift_datetime(s),
-            'duration': self._opshift_len(l),
-            'cycle': str(c),
-            'pattern': ','.join([str(i) for i in p]),
-            'key': key,
-            'type': t
-        }
+        for s in shift_list:
+            self._insert_shift(s)
 
     def _insert_shift(self, sft):
 
@@ -705,7 +731,7 @@ class VehicleShiftTable(DataTable):
             "Shift_Duration": sft['duration'],
             "Repeat_Cycle": sft['cycle'],
             "Repeat_Pattern": sft['pattern'],
-            "Vehicle_Attributes": sft['attr'],
+            "Vehicle_Attributes": '{{{}}}'.format(','.join(sft['attr'])),
             "Mobilization_Delay": sft['delay']
         }
 
@@ -724,14 +750,13 @@ class VehicleShiftTable(DataTable):
 
 
 
-
 class ShiftEventTable(DataTable):
 
     lib = {
         'METRO_30': [
             {
                 'Event_Type': 1,
-                'Offset': 0.020833333333,
+                'Offset': Decimal(0.020833333333),
                 'Offset_From': 0,
                 'Parameters-->':
                     '<RspPermitted NonePermitted="0"><Filter><CallPriority><FilteredValueSet><Value>P1</Value><Value>P2</Value></FilteredValueSet></CallPriority></Filter></RspPermitted>',
@@ -739,7 +764,7 @@ class ShiftEventTable(DataTable):
             },
             {
                 'Event_Type': 1,
-                'Offset': 0.000694444444,
+                'Offset': Decimal(0.000694444444),
                 'Offset_From': 0,
                 'Parameters-->':
                     '<RspPermitted NonePermitted="1"/>',
@@ -771,3 +796,8 @@ class ShiftEventTable(DataTable):
 
     def delete(self, id_list):
         self.df = self.df[~self.df['Shift_Id'].isin(id_list)]
+
+    def defined(self, ename):
+        r = True if ename in self.lib else False
+
+        return(r)

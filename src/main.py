@@ -24,22 +24,24 @@ def build_shift(shifts, f):
     shift_list = shifts.to_opshift(f, duration=15, target_week='2017-11-04T00:00:00')
 
     # Add names to each unit
-    shifts.assign_unit_names(shift_list, 'TEST', 'A', np.arange(1, len(shift_list)))
+    shifts.assign_unit_names(shift_list, 'TSTA', 'A', np.arange(1, len(shift_list)+1))
 
     # Add attributes
+    shifts.assign_attr(shift_list, ['EDMO', 'ALS', 'METRO'])
 
     # Add mobilization delay
+    shifts.assign_delay(shift_list, 'StandardDelay')
 
     # Add event types
-
-    # Add
-
+    shifts.assign_events(shift_list, 'METRO_30')
 
     # Add base assingment to shifts by distributing shifts in order of start
     # time across a set number of basess
-    #self.assign_bases(shift_list, ['EDMO-1', 'EDMO-2', 'EDMO-3'], False)
+    shifts.assign_bases(shift_list, ['EDMO-400', 'EDMO-36', 'EDMO-42'], False)
 
+    print(shift_list[1])
 
+    shifts.insert(shift_list)
 
 
 if __name__ == "__main__":
