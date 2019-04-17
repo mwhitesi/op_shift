@@ -60,12 +60,15 @@ class Experiment:
         avail = curr[~np.isin(curr, self.vs().df['Shift_Id'])]
 
         missing = n2 - len(avail)
-        ids = np.concatenate(avail, np.arange(i+1, i+missing+1)) if avail else np.arange(i+1, i+missing+1)
+        if len(avail) > 0:
+            ids = np.concatenate((avail, np.arange(i+1, i+missing+1)))
+        else:
+            ids = np.arange(i+1, i+missing+1)
 
         for i, s in enumerate(shift_list):
             s['id'] = ids[i]
 
-        self.opshift.insert(shift_list)
+        self.opshifts.insert(shift_list)
 
         self._reset_mask()
 
@@ -446,7 +449,8 @@ class OPShift:
         self.e.delete(id_list)
 
     def insert(self, shift_list):
-        pass
+        self.vs.insert(shift_list)
+        self.e.insert(shift_list)
 
     def write(self, f):
         with open(f, 'w', newline='') as csvfile:
@@ -484,6 +488,7 @@ class DataTable:
         else:
             self.df = pd.read_csv(csvfile, encoding='utf-8', header=None,
                                   index_col=False)
+        print(self.df.info())
 
     @staticmethod
     def datetime(flt):
@@ -506,6 +511,10 @@ class DataTable:
         return(d.days-1, d.hours, d.minutes, d.seconds)
 
     def write(self, fh):
+
+        if 'Shift_id' in self.df:
+            self.df.sort_values(by='Shift_Id')
+
         csvwriter = writer(fh,
                            delimiter='\t',
                            quoting=QUOTE_NONE,
@@ -690,8 +699,6 @@ class VehicleShiftTable(DataTable):
                         if end_dt > target_end_dt:
                             end_dt = target_end_dt
 
-                        # print(day_dt)
-                        # print(end_dt)
                         shift_range = pd.date_range(day_dt, end_dt,
                                                     freq=duration_str)
                         shift_range = shift_range[0:-1]  # Drop last value
@@ -708,10 +715,10 @@ class VehicleShiftTable(DataTable):
         # Remove from attribute_lookup
         for id in id_list:
             r = self.df[self.df['Shift_Id'] == id]
-            a = r["Vehicle_Attributes"]
+            a = r["Vehicle_Attributes"].values[0]
             alist = VehicleShiftTable._attr_parser(a)
             for a2 in alist:
-                d[a2].remove(id)
+                self.attribute_lookup[a2].remove(id)
 
         self.df = self.df[~self.df['Shift_Id'].isin(id_list)]
 
@@ -736,18 +743,20 @@ class VehicleShiftTable(DataTable):
         }
 
         # Optional with defaults
-        new_shift["Handover_Delay"] = sft['handover'] if sft['handover'] else Decimal(0)
-        new_shift["Dispatch_Priority"] = sft['priority'] if sft['priority'] else int(1)
-        new_shift["Dispatch_Region"] = sft['region'] if sft['region'] else None
-        new_shift["Associate_Vehicle"] = sft['vehicle'] if sft['vehicle'] else int(-1)
-        new_shift["Allow_Deployment"] = sft['deploy'] if sft['deploy'] else int(1)
-        new_shift["Response_Restrictions"] = sft['restrict'] if sft['restrict'] else '<RspPermitted NonePermitted="0"/>'
-        new_shift["Notes_Date"] = sft['note_date'] if sft['note_date'] else Decimal(0)
-        new_shift["Notes"] = sft['note_date'] if sft['note_date'] else None
-        new_shift["Repeat_Until_Date"] = sft['until'] if sft['until'] else Decimal(47484.000000000000)
+        new_shift["Handover_Delay"] = sft['handover'] if 'handover' in sft else Decimal(0)
+        new_shift["Dispatch_Priority"] = sft['priority'] if 'priority' in sft else int(1)
+        new_shift["Dispatch_Region"] = sft['region'] if 'region' in sft else None
+        new_shift["Associate_Vehicle"] = sft['vehicle'] if 'vehicle' in sft else int(-1)
+        new_shift["Allow_Deployment"] = sft['deploy'] if 'deploy' in sft else int(1)
+        new_shift["Response_Restrictions"] = sft['restrict'] if 'restrict' in sft else '<RspPermitted NonePermitted="0"/>'
+        new_shift["Notes_Date"] = sft['note_date'] if 'note_date' in sft else Decimal(0)
+        new_shift["Notes"] = sft['note_date'] if 'note_date' in sft else None
+        new_shift["Repeat_Until_Date"] = sft['until'] if 'until' in sft else Decimal(47484.000000000000)
 
-        self.append(new_shift, ignore_index=True)
+        self.df = self.df.append(new_shift, ignore_index=True)
 
+        for a in sft['attr']:
+            self.attribute_lookup[a].add(sft['id'])
 
 
 class ShiftEventTable(DataTable):
@@ -790,9 +799,7 @@ class ShiftEventTable(DataTable):
         deci_cols = [
             "Offset"
         ]
-        super(ShiftEventTable, self).__init__(csvfile, cols)
-
-        #print(self.df.loc[1])
+        super(ShiftEventTable, self).__init__(csvfile, cols, deci_cols)
 
     def delete(self, id_list):
         self.df = self.df[~self.df['Shift_Id'].isin(id_list)]
@@ -801,3 +808,10 @@ class ShiftEventTable(DataTable):
         r = True if ename in self.lib else False
 
         return(r)
+
+    def insert(self, shift_list):
+        for s in shift_list:
+            e = self.lib[s['event']]
+            for r in e:
+                r['Shift_Id'] = s['id']
+            self.df = self.df.append(e)
