@@ -588,36 +588,36 @@ class VehicleShiftTable(DataTable):
                 "--------------------", "--------------------",
                 "--------------------", "--------------------"))
 
-    def __init__(self, csvfile):
+    cols = [
+        "Shift_Id",
+        "Vehicle_Name",
+        "Base_Code",
+        "Start_DateTime",
+        "Shift_Duration",
+        "Repeat_Until_Date",
+        "Handover_Delay",
+        "Repeat_Cycle",
+        "Repeat_Pattern",
+        "Vehicle_Attributes",
+        "Mobilization_Delay",
+        "Dispatch_Priority",
+        "Dispatch_Region",
+        "Associate_Vehicle",
+        "Allow_Deployment",
+        "Response_Restrictions",
+        "Notes_Date",
+        "Notes"
+    ]
+    deci_cols = [
+        "Start_DateTime",
+        "Shift_Duration",
+        "Repeat_Until_Date",
+        "Handover_Delay",
+        "Notes_Date"
+    ]
 
-        cols = [
-            "Shift_Id",
-            "Vehicle_Name",
-            "Base_Code",
-            "Start_DateTime",
-            "Shift_Duration",
-            "Repeat_Until_Date",
-            "Handover_Delay",
-            "Repeat_Cycle",
-            "Repeat_Pattern",
-            "Vehicle_Attributes",
-            "Mobilization_Delay",
-            "Dispatch_Priority",
-            "Dispatch_Region",
-            "Associate_Vehicle",
-            "Allow_Deployment",
-            "Response_Restrictions",
-            "Notes_Date",
-            "Notes"
-        ]
-        deci_cols = [
-            "Start_DateTime",
-            "Shift_Duration",
-            "Repeat_Until_Date",
-            "Handover_Delay",
-            "Notes_Date"
-        ]
-        super(VehicleShiftTable, self).__init__(csvfile, cols, deci_cols)
+    def __init__(self, csvfile):
+        super(VehicleShiftTable, self).__init__(csvfile, self.cols, self.deci_cols)
 
         # Make lookup for attributes
         d = defaultdict(list)
@@ -672,6 +672,11 @@ class VehicleShiftTable(DataTable):
         cols = ['Shift_Id', 'Start_DateTime', 'Shift_Duration',
                 'Repeat_Until_Date', 'Repeat_Cycle', 'Repeat_Pattern']
         for index, row in df[cols].iterrows():
+
+            # Convert all decimals to float
+            for c in self.deci_cols:
+                if c in row:
+                    row[c] = float(row[c])
 
             first_dt = self.datetime(row['Start_DateTime'])
             last_dt = self.datetime(row['Repeat_Until_Date'])
