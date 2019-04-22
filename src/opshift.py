@@ -76,12 +76,12 @@ class Experiment:
 
         # Step 1: convert binary matrix to OP shift format
         sm = pd.read_csv(f, encoding='utf-8', index_col=0)
-        sm = sm.iloc[:, 0:-1]
+        #sm = sm.iloc[:, 0:-1]
         ncol = sm.shape[1]
 
         if ncol != 24*7*60/duration:
             raise Exception(
-                'Incorrect shift matrix dimesions for duration {}'.format(
+                'Incorrect shift matrix dimensions for duration {}'.format(
                     duration
                 ))
 

@@ -1,11 +1,13 @@
 from opshift import Experiment
+import os
 import pandas as pd
 import numpy as np
 
-def main(op_shift_file, opt_shift_file, pp_shift_file):
+def main(op_shift_file, sm_files, sm_unit_names):
 
     dur = 15
     week = '2017-10-01T00:00:00'
+    op_file = 'data/interim/opshift.csv'
 
     # Convert existing shifts to hub model
     opshifts = Experiment(op_shift_file)
@@ -14,24 +16,32 @@ def main(op_shift_file, opt_shift_file, pp_shift_file):
     opshifts.subset(attribute_filter=['EDMO','METRO'])
     sm = opshifts.shift_matrix(dur, week)
     smdt = pd.DataFrame(sm)
-    smdt.to_csv('data/interim/opshift.csv',
+    smdt = smdt.T
+    smdt.to_csv(op_file,
         sep=',',
         header=True,
         index=True,
         float_format='%.1f'
-     )
+    )
+    sm_files.append(op_file)
+    sm_unit_names.append('OPTA')
 
-    # shifts1.delete(current_subset=True)
-    #
-    # build_shift(shifts1, f2)
-    #
-    # shifts1.write('tmp.txt')
+    for i,f in enumerate(sm_files):
+        uname = sm_unit_names[i]
+        build_shift(op_shift_file, f, uname, week)
 
 
-def build_shift(shifts, f, unit_pre):
+
+def build_shift(shift_f, f, unit_pre, week):
+
+    shifts = Experiment(shift_f)
+
+    # Replace EDMO 911 shifts with new shifts
+    shifts.subset(attribute_filter=['EDMO','METRO'])
+    shifts.delete(current_subset=True)
 
     # Convert matrix to Optima Predict list format
-    shift_list = shifts.to_opshift(f, duration=15, target_week='2017-10-01T00:00:00')
+    shift_list = shifts.to_opshift(f, duration=15, target_week=week)
 
     # Add names to each unit
     shifts.assign_unit_names(shift_list, unit_pre, 'A', np.arange(1, len(shift_list)+1))
@@ -49,14 +59,17 @@ def build_shift(shifts, f, unit_pre):
     # time across a set number of basess
     shifts.assign_bases(shift_list, ['EDMO-400', 'EDMO-36', 'EDMO-39'], False)
 
-    print(shift_list[1])
-
+    # Add newly constructed shifts
     shifts.insert(shift_list)
 
-    print(shifts.vs().df.shape)
+    # Save shifts
+    filenm = os.path.splitext(os.path.basename(f))[0]
+    shifts.write(os.path.join('data', 'interim', filenm+'.amb.txt'))
 
 
 if __name__ == "__main__":
-    main('data/raw/VehicleShifts_20181010.amb.txt', 'data/interim/test_base_36.csv',
-        'None')
+    main('data/raw/VehicleShifts_20181010.amb.txt',
+         ['data/raw/funded_unit_shift_matrix.csv', 'data/raw/optimized_block_shift_matrix.csv'],
+         ['PROV', 'REGR'],
+        )
     print('ok')
