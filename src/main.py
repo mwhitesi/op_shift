@@ -6,7 +6,7 @@ import numpy as np
 def main(op_shift_file, sm_files, sm_unit_names):
 
     dur = 15
-    week = '2017-10-01T00:00:00'
+    week = '2017-09-24T00:00:00'
     op_file = 'data/interim/opshift.csv'
 
     # Convert existing shifts to hub model
@@ -57,7 +57,7 @@ def build_shift(shift_f, f, unit_pre, week):
 
     # Add base assingment to shifts by distributing shifts in order of start
     # time across a set number of basess
-    shifts.assign_bases(shift_list, ['EDMO-400', 'EDMO-36', 'EDMO-39'], False)
+    shifts.assign_bases(shift_list, ['EDMO-400', 'EDMO-200', 'EDMO-300'], False)
 
     # Add newly constructed shifts
     shifts.insert(shift_list)
@@ -70,6 +70,6 @@ def build_shift(shift_f, f, unit_pre, week):
 if __name__ == "__main__":
     main('data/raw/VehicleShifts_20181010.amb.txt',
          ['data/raw/funded_unit_shift_matrix.csv', 'data/raw/optimized_block_shift_matrix.csv'],
-         ['PROV', 'REGR'],
+         ['PROF', 'REGR'],
         )
     print('ok')
