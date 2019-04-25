@@ -24,7 +24,7 @@ def main(op_shift_file, sm_files, sm_unit_names):
         float_format='%.1f'
     )
     sm_files.append(op_file)
-    sm_unit_names.append('OPTA')
+    sm_unit_names.append('EDMO')
 
     for i,f in enumerate(sm_files):
         uname = sm_unit_names[i]
@@ -44,7 +44,8 @@ def build_shift(shift_f, f, unit_pre, week):
     shift_list = shifts.to_opshift(f, duration=15, target_week=week)
 
     # Add names to each unit
-    shifts.assign_unit_names(shift_list, unit_pre, 'A', np.arange(1, len(shift_list)+1))
+    start_id = 1000
+    shifts.assign_unit_names(shift_list, unit_pre, 'A', np.arange(start_id, len(shift_list)+start_id))
 
     # Add attributes
     shifts.assign_attr(shift_list, ['EDMO', 'ALS', 'METRO'])
@@ -70,6 +71,6 @@ def build_shift(shift_f, f, unit_pre, week):
 if __name__ == "__main__":
     main('data/raw/VehicleShifts_20181010.amb.txt',
          ['data/raw/funded_unit_shift_matrix.csv', 'data/raw/optimized_block_shift_matrix.csv'],
-         ['PROF', 'REGR'],
+         ['EDMO', 'EDMO'],
         )
     print('ok')

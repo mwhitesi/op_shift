@@ -164,8 +164,8 @@ class Experiment:
             ends_totals[ends] += 1
 
         if daynight_shifts > 0:
-            #self.assign_dn_starts(starts_totals, daynight_shifts, duration, 20, 80)
-            shifts.extend(self.assign_dn_starts(starts_totals, 20, duration, 20, 80, dts))
+            #print("Number of 247 shifts: {}".format(daynight_shifts))
+            shifts.extend(self.assign_dn_starts(starts_totals, daynight_shifts, duration, 20, 80, dts))
 
         return(shifts)
 
