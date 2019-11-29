@@ -293,6 +293,7 @@ class Experiment:
         if do_plot:
             self.plot_base_record(base_record)
 
+
     def plot_base_record(self, br):
 
         def flatten(wk):
@@ -349,6 +350,20 @@ class Experiment:
             raise Exception('Unknown Mobilisation Delay parameter')
         for s in shifts:
             s['delay'] = dname
+
+    def auto_assign_delay(self, shifts, day_dname, night_dname):
+        if not self.opshifts.md.defined(day_dname):
+            raise Exception('Unknown Mobilisation Delay parameter for daytime')
+
+        if not self.opshifts.md.defined(night_dname):
+            raise Exception('Unknown Mobilisation Delay parameter for nighttime')
+
+        for i, s in enumerate(shifts):
+            hr = DataTable.datetime(s['start']).hour
+            if hr >= 0 and hr <= 12:
+                s['delay'] = day_dname
+            else:
+                s['delay'] = night_dname
 
     def assign_events(self, shifts, ename):
         if not self.opshifts.e.defined(ename):

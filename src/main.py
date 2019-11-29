@@ -57,7 +57,7 @@ def build_shift(shift_f, f, unit_pre, week):
     shifts.assign_events(shift_list, 'METRO_30')
 
     # Add base assingment to shifts by distributing shifts in order of start
-    # time across a set number of basess
+    # time across a set number of bases
     shifts.assign_bases(shift_list, ['EDMO-400', 'EDMO-200', 'EDMO-300'], False)
 
     # Add newly constructed shifts
@@ -70,7 +70,8 @@ def build_shift(shift_f, f, unit_pre, week):
 
 if __name__ == "__main__":
     main('data/raw/VehicleShifts_20181010.amb.txt',
-         ['data/raw/funded_unit_shift_matrix.csv', 'data/raw/optimized_block_shift_matrix.csv'],
+         ['data/raw/funded_unit_shift_matrix.csv', 'data/raw/optimized_shift_matrix.csv'],
          ['EDMO', 'EDMO'],
         )
+
     print('ok')
