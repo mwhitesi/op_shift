@@ -20,13 +20,20 @@ class Experiment:
         self.vehicle_ids = self.vs().shift_id_list()
         self._reset_mask()
 
-    def subset(self, attribute_filter=None, base_filter=None):
+    def subset(self, attribute_filter=None, base_filter=None, unit_filter=None,
+        unitpref_filter=None):
 
+        if unitpref_filter is not None:
+            self.mask = self.vs().muni_search(unit_filter)
         if base_filter is not None:
-            self.mask = self.vs().base_search(base_filter)
+            self.mask = self.mask & \
+                self.vs().base_search(base_filter)
         if attribute_filter is not None:
             self.mask = self.mask & \
                 self.vs().attribute_search(attribute_filter, or_op=False)
+        if unit_filter is not None:
+            self.mask = self.mask & \
+                self.vs().unit_search(unit_filter)
 
     def vs(self):
         return(self.opshifts.vs)
@@ -664,6 +671,17 @@ class VehicleShiftTable(DataTable):
                     rows = rows & s
 
         return(self.df['Shift_Id'].isin(rows).values)
+
+    def unit_search(self, name_list):
+        return(self.df.loc[self.df['Vehicle_Name'].isin(name_list),'Shift_Id'].values)
+
+    def muni_search(self, muni_list):
+        rows = set()
+
+        pat = '^'+muni_list.join('|')
+        rows = self.df['Vehicle_Name'].str.match(pat)
+
+        return(self.df.loc[rows, 'Shift_Id'].values)
 
     def base_search(self, base):
         return((self.df['Base_Code'] == base).values)
